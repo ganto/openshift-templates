@@ -1,0 +1,284 @@
+---
+apiVersion: v1
+kind: Template
+labels:
+  template: gitea-persistent-template
+message: |-
+  Before the Gitea application can be started your cluster administrator must grant the 'anyuid' SCC to the service account you just created:
+
+    oc project <your-project>
+    oc adm policy add-scc-to-user anyuid -z ${APPLICATION_NAME}
+
+  If you enable SSH access to Gitea you further have to make sure that the firewall doesn't block access to ${SSH_DOMAIN}:${SSH_PORT}.
+
+  The first user registered at ${HTTP_PROTOCOL}:${HTTP_DOMAIN} will have administration privileges in this Gitea instance.
+metadata:
+  annotations:
+    description: |-
+      Gitea version control repository server, with persistent storage and optional external database.
+
+      NOTE: You must have persistent volumes available in your cluster to use this template.
+    iconClass: icon-git
+    openshift.io/display-name: Gitea
+    openshift.io/documentation-url: https://github.com/go-gitea/gitea/blob/master/docs/content/doc/installation/with-docker.en-us.md
+    openshift.io/long-description: >-
+      This template defines resources to operate a Gitea installation, including
+      config map, secret, persistent volume claim, deployment configuration, service and route
+    openshift.io/provider-display-name: "Reto Gantenbein"
+    openshift.io/support-url: https://github.com/go-gitea/gitea
+    tags: "git,version-control,ci-cd"
+  name: gitea-persistent
+objects:
+- apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: gitea-config
+  data:
+    APP_NAME: ${APP_NAME}
+    RUN_MODE: "prod"
+    ROOT_URL: ${HTTP_PROTOCOL}://${HTTP_DOMAIN}
+    DISABLE_SSH: ${DISABLE_SSH}
+    SSH_DOMAIN: ${SSH_DOMAIN}
+    SSH_PORT: ${SSH_PORT}
+    DB_TYPE: ${DB_TYPE}
+    DB_HOST: ${DB_HOST}
+    DB_NAME: ${DB_NAME}
+    DB_USER: ${DB_USER}
+    DB_PASSWD: ${DB_PASSWD}
+    INSTALL_LOCK: "true"
+    DISABLE_REGISTRATION: ${DISABLE_REGISTRATION}
+    REQUIRE_SIGNIN_VIEW: ${REQUIRE_SIGNIN_VIEW}
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    name: ${APPLICATION_NAME}
+  spec:
+    replicas: 1
+    selector:
+      app: ${APPLICATION_NAME}
+      deploymentconfig: ${APPLICATION_NAME}
+    strategy:
+      type: Rolling
+      rollingParams:
+        intervalSeconds: 1
+        maxSurge: 25%
+        maxUnavailable: 25%
+        timeoutSeconds: 600
+        updatePeriodSeconds: 1
+    template:
+      metadata:
+        labels:
+          app: ${APPLICATION_NAME}
+          deploymentconfig: ${APPLICATION_NAME}
+      spec:
+        containers:
+        - name: ${APPLICATION_NAME}
+          image: ${APPLICATION_NAME}:${GITEA_VERSION}
+          imagePullPolicy: Always
+          envFrom:
+          - secretRef:
+              name: gitea-secret
+          - configMapRef:
+              name: gitea-config
+          ports:
+          - containerPort: 22
+            protocol: TCP
+          - containerPort: 3000
+            protocol: TCP
+          volumeMounts:
+          - name: gitea-data
+            mountPath: /data/
+          - name: gitea-empty
+            mountPath: /data/gitea/conf/
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+              scheme: HTTP
+            initialDelaySeconds: 3
+            timeoutSeconds: 1
+            periodSeconds: 20
+            successThreshold: 1
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+              scheme: HTTP
+            initialDelaySeconds: 20
+            timeoutSeconds: 1
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 10
+          resources:
+            requests:
+              cpu: 200m
+              memory: 128Mi
+            limits:
+              cpu: ${LIMIT_CPU}m
+              memory: ${LIMIT_MEMORY}M
+        restartPolicy: Always
+        serviceAccount: ${APPLICATION_NAME}
+        serviceAccountName: ${APPLICATION_NAME}
+        volumes:
+        - name: gitea-data
+          persistentVolumeClaim:
+            claimName: gitea-data
+        - name: gitea-empty
+          emptyDir: {}
+    triggers:
+    - type: ConfigChange
+    - type: ImageChange
+      imageChangeParams:
+        automatic: true
+        containerNames:
+        - ${APPLICATION_NAME}
+        from:
+          kind: ImageStreamTag
+          name: ${APPLICATION_NAME}:${GITEA_VERSION}
+- kind: ImageStream
+  apiVersion: v1
+  metadata:
+    name: ${APPLICATION_NAME}
+  spec:
+    tags:
+    - name: ${GITEA_VERSION}
+      from:
+        kind: DockerImage
+        name: docker.io/gitea/gitea:${GITEA_VERSION}
+      annotations:
+        description: The Gitea git server docker image
+        tags: git
+      version: ${GITEA_VERSION}
+- apiVersion: v1
+  kind: Route
+  metadata:
+    name: ${APPLICATION_NAME}
+  spec:
+    host: ${HTTP_DOMAIN}
+    port:
+      targetPort: http
+    to:
+      kind: Service
+      name: ${APPLICATION_NAME}
+      weight: 100
+    wildcardPolicy: None
+- apiVersion: v1
+  kind: Secret
+  metadata:
+    name: gitea-secret
+  type: Opaque
+  stringData:
+    SECRET_KEY: "`${SECRET_KEY}`"
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: ${APPLICATION_NAME}
+  spec:
+    ports:
+    - name: http
+      port: 3000
+      protocol: TCP
+      targetPort: 3000
+    selector:
+      app: ${APPLICATION_NAME}
+      deploymentconfig: ${APPLICATION_NAME}
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: ${APPLICATION_NAME}-ssh
+  spec:
+    ports:
+    - name: ssh
+      nodePort: ${SSH_PORT}
+      port: 22
+      protocol: TCP
+      targetPort: 22
+    selector:
+      app: ${APPLICATION_NAME}
+      deploymentconfig: ${APPLICATION_NAME}
+    sessionAffinity: ClientIP
+    type: NodePort
+- apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: ${APPLICATION_NAME}
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: gitea-data
+  spec:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: ${STORAGE_CAPACITY}
+parameters:
+- name: APPLICATION_NAME
+  displayName: Openshift Application name
+  value: gitea
+- name: GITEA_VERSION
+  displayName: Gitea Version (docker image tag)
+  value: "1.6"
+- name: APP_NAME
+  displayName: Application name, used in the page title
+  value: "Gitea: Git with a cup of tea"
+- name: HTTP_DOMAIN
+  displayName: HTTP domain name
+  description: Public domain name of this server, used to generate links in the Web UI
+  value: gitea.192.168.99.100.nip.io
+  required: true
+- name: HTTP_PROTOCOL
+  displayName: HTTP protocol
+  description: Protocol used to generate links in the Web UI [http, https]
+  value: http
+  required: true
+- name: DISABLE_SSH
+  displayName: Disable SSH
+  description: Disable SSH feature when NodePort access is not available
+  value: "false"
+- name: SSH_DOMAIN
+  displayName: SSH domain name
+  description: Domain name of this server, used for the displayed clone URL in the Web UI
+  value: gitea-ssh.192.168.99.100.nip.io
+  required: true
+- name: SSH_PORT
+  displayName: SSH port
+  description: SSH port displayed in clone URL
+  value: "30022"
+- name: DB_TYPE
+  displayName: Database type [sqlite3, postgres, mysql, mssql]
+  value: sqlite3
+- name: DB_HOST
+  displayName: Database host
+  value: "postgres.svc.local:5432"
+- name: DB_NAME
+  displayName: Database name
+  value: gitea
+- name: DB_USER
+  displayName: Database username
+  value: gitea
+- name: DB_PASSWD
+  displayName: Database password
+  value: gitea
+- name: DISABLE_REGISTRATION
+  displayName: Disable registration
+  description: Disable registration, after which only admin can create accounts for users
+  value: "false"
+- name: REQUIRE_SIGNIN_VIEW
+  displayName: Require sign in
+  description: Enable this to force users to log in to view any page
+  value: "false"
+- name: STORAGE_CAPACITY
+  displayName: Data volume capacity
+  value: "1G"
+- name: SECRET_KEY
+  displayName: Global secret key
+  generate: expression
+  from: "[a-zA-Z0-9]{65}"
+- name: LIMIT_CPU
+  displayName: Container CPU limit in millicores
+  value: "1000"
+- name: LIMIT_MEMORY
+  displayName: Container memory limit in megabytes
+  value: "256"
