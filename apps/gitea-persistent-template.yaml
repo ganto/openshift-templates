@@ -209,7 +209,7 @@ objects:
     name: gitea-data
   spec:
     accessModes:
-      - ReadWriteOnce
+      - ReadWriteMany
     resources:
       requests:
         storage: ${STORAGE_CAPACITY}
