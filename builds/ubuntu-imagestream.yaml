@@ -1,0 +1,38 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  annotations:
+    openshift.io/display-name: Ubuntu
+  name: ubuntu
+spec:
+  dockerImageRepository: docker.io/ubuntu
+  lookupPolicy:
+    local: true
+  tags:
+  - annotations: null
+    from:
+      kind: DockerImage
+      name: docker.io/ubuntu:latest
+    importPolicy:
+      scheduled: true
+    name: latest
+    referencePolicy:
+      type: Source
+  - annotations: null
+    from:
+      kind: DockerImage
+      name: docker.io/ubuntu:bionic
+    importPolicy:
+      scheduled: true
+    name: bionic
+    referencePolicy:
+      type: Source
+  - annotations: null
+    from:
+      kind: DockerImage
+      name: docker.io/ubuntu:xenial
+    importPolicy:
+      scheduled: true
+    name: xenial
+    referencePolicy:
+      type: Source
