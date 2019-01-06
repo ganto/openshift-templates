@@ -1,0 +1,66 @@
+# Creates a docker build from the bivac source repository storing the result
+# in a local ImageStream.
+#
+# Instantiate via e.g.:
+#   oc process -f bivac-build.yaml [-p BIVAC_REPO_URL=https://myrepo/bivac.git] \
+#     | oc create -f -
+#
+apiVersion: v1
+kind: Template
+objects:
+- apiVersion: build.openshift.io/v1
+  kind: BuildConfig
+  metadata:
+    labels:
+      app: ${APP_NAME}
+    name: ${BUILD_NAME}
+  spec:
+    failedBuildsHistoryLimit: 5
+    output:
+      to:
+        kind: ImageStreamTag
+        name: bivac:${BIVAC_IMAGE_TAG}
+    postCommit: {}
+    resources: {}
+    runPolicy: Serial
+    source:
+      git:
+        uri: ${BIVAC_REPO_URL}
+        ref: ${BIVAC_SOURCE_REF}
+      type: Git
+    strategy:
+      dockerStrategy:
+        from:
+          kind: DockerImage
+          name: scratch
+      type: Docker
+    successfulBuildsHistoryLimit: 5
+    triggers:
+    - type: ConfigChange
+- apiVersion: image.openshift.io/v1
+  kind: ImageStream
+  metadata:
+    annotations:
+      openshift.io/display-name: Bivac
+    labels:
+      app: ${APP_NAME}
+    name: ${APP_NAME}
+  spec:
+    lookupPolicy:
+      local: true
+parameters:
+- description: Application name
+  name: APP_NAME
+  value: bivac
+- description: Tag given to Bivac image
+  name: BIVAC_IMAGE_TAG
+  value: latest
+- description: Bivac git repository URL
+  name: BIVAC_REPO_URL
+  value: https://github.com/camptocamp/bivac.git
+- description: Git source reference to build
+  name: BIVAC_SOURCE_REF
+  value: master
+- description: Build name
+  name: BUILD_NAME
+  value: bivac

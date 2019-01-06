@@ -1,0 +1,58 @@
+# Creates a docker build from the duplicity source repository storing the result
+# in a local ImageStream.
+#
+# Instantiate via e.g.:
+#   oc process -f duplicity-build.yaml [-p DUPLICITY_REPO_URL=https://myrepo/docker-duplicity.git] \
+#     | oc create -f -
+#
+apiVersion: v1
+kind: Template
+objects:
+- apiVersion: build.openshift.io/v1
+  kind: BuildConfig
+  metadata:
+    labels:
+      app: ${APP_NAME}
+    name: ${APP_NAME}
+  spec:
+    failedBuildsHistoryLimit: 5
+    output:
+      to:
+        kind: ImageStreamTag
+        name: duplicity:latest
+    postCommit: {}
+    resources: {}
+    runPolicy: Serial
+    source:
+      git:
+        uri: ${DUPLICITY_REPO_URL}
+        ref: master
+      type: Git
+    strategy:
+      dockerStrategy:
+        from:
+          kind: ImageStreamTag
+          name: ubuntu:xenial
+      type: Docker
+    successfulBuildsHistoryLimit: 5
+    triggers:
+    - type: ConfigChange
+    - type: ImageChange
+- apiVersion: image.openshift.io/v1
+  kind: ImageStream
+  metadata:
+    annotations:
+      openshift.io/display-name: Duplicity
+    labels:
+      app: ${APP_NAME}
+    name: ${APP_NAME}
+  spec:
+    lookupPolicy:
+      local: true
+parameters:
+- description: Application name
+  name: APP_NAME
+  value: duplicity
+- description: Duplicity docker file repository URL
+  name: DUPLICITY_REPO_URL
+  value: https://github.com/camptocamp/docker-duplicity.git
